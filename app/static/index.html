@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Resume Matcher + JD Analyzer</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="container">
+    <header class="hero card">
+      <h1>Resume Matcher + JD Analyzer</h1>
+      <p class="muted">Analyze resume-job fit, then rewrite selected LaTeX resume sections for better ATS alignment.</p>
+    </header>
+
+    <section class="card">
+      <h2>Step 1 - Analyze Match</h2>
+      <div class="field">
+        <label for="resumeFile">Resume (PDF/DOCX/TXT)</label>
+        <input id="resumeFile" type="file" accept=".pdf,.docx,.txt" />
+      </div>
+
+      <div class="field">
+        <label for="jdText">Job Description</label>
+        <textarea id="jdText" rows="10" placeholder="Paste job description here..."></textarea>
+      </div>
+
+      <button id="analyzeBtn">Analyze Match</button>
+      <p id="status" class="muted"></p>
+    </section>
+
+    <section class="card">
+      <h2>Match Result</h2>
+      <p id="score" class="score-pill">Score: -</p>
+      <p id="summary" class="muted"></p>
+      <div class="grid">
+        <div class="subcard">
+          <h3>Matched Skills</h3>
+          <ul id="matched"></ul>
+        </div>
+        <div class="subcard">
+          <h3>Missing Skills</h3>
+          <ul id="missing"></ul>
+        </div>
+      </div>
+      <div class="subcard">
+        <h3>Improvement Suggestions</h3>
+        <ul id="suggestions"></ul>
+      </div>
+    </section>
+
+    <section id="latexPanel" class="card hidden">
+      <h2>Step 2 - Improve Selected LaTeX Sections</h2>
+      <p class="muted">Paste your LaTeX resume code. Sections are extracted automatically; then select what to improve.</p>
+
+      <div class="field">
+        <label for="latexCode">LaTeX Resume Code</label>
+        <textarea id="latexCode" rows="12" placeholder="Paste full LaTeX source..."></textarea>
+      </div>
+
+      <button id="rewriteBtn" disabled>Rewrite Selected Sections</button>
+
+      <p id="latexStatus" class="muted"></p>
+      <div id="sectionContainer" class="section-list"></div>
+      <div class="field">
+        <label for="rewriteOutput">Rewritten Section Content</label>
+        <textarea id="rewriteOutput" rows="12" readonly placeholder="Rewritten sections will appear here..."></textarea>
+      </div>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

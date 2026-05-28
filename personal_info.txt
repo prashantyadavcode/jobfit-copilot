@@ -1,0 +1,44 @@
+Resume Matcher + JD Analyzer - Full Interview Notes
+
+1) PROJECT PURPOSE
+- Compare candidate resume against job description using NLP.
+- Output skill match score, matched/missing skills, and resume improvement suggestions.
+
+2) PIPELINE
+- Ingestion: PDF/DOCX/TXT parser
+- Preprocessing: cleanup + token analysis
+- NLP extraction: skills + entities + top terms
+- Scoring: skill overlap + fuzzy term similarity
+- Delivery: FastAPI endpoints + browser frontend
+
+3) KEY ENDPOINTS
+- /analyze/text
+- /analyze/files
+- /analyze/mixed
+
+4) JOB SKILL MAPPING
+- NLP models and text processing -> spaCy + NLTK extraction
+- End-to-end pipeline -> ingestion to API output
+- FastAPI backend -> production style endpoints
+- Dataset handling -> unstructured resume/JD files
+- Clean scalable code -> modular src structure
+
+5) INTERVIEW QUESTIONS
+Q: How is match score calculated?
+A: Weighted combination of required-skill overlap (70%) and fuzzy semantic similarity from extracted top terms (30%).
+
+Q: How do you extract skills?
+A: Skill lexicon lookup over cleaned text plus NLP token normalization.
+
+Q: How can this be improved?
+A: Replace lexicon with transformer-based skill tagging, add section-aware parsing, and calibrate score with labeled recruiter outcomes.
+
+Q: How would you deploy?
+A: Dockerize app, host behind Nginx, monitor health/logs, and integrate CI/CD tests.
+
+6) DEMO SCRIPT
+- Upload resume
+- Paste JD
+- Click Analyze
+- Explain score, missing skills, and suggestions
+
