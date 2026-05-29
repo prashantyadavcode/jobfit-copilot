@@ -7,12 +7,100 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from json_repair import repair_json
+
+REWRITE_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "rewrites": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["id", "title", "content"],
+            },
+        }
+    },
+    "required": ["rewrites"],
+}
 
 
 SECTION_PATTERN = re.compile(
     r"(?P<section_cmd>\\section\*?)\{(?P<title>[^}]+)\}(?P<body>.*?)(?=\\section\*?\{|$)",
     re.DOTALL,
 )
+
+# Commands that must not appear inside a rewritten section body (next-section leak).
+NEXT_LATEX_BOUNDARY_RE = re.compile(
+    r"(?:\\{2,}\\section\*?\{|\\section\*?\{|\\subsection\*?\{|\\chapter\*?\{|\\vspace\*?\{)",
+    re.IGNORECASE,
+)
+
+JD_PROSE_RE = re.compile(
+    r"key responsibilities|good to have|multilingual nlp|programming strong|"
+    r"develop and implement nlp|collaborate with data scientists",
+    re.IGNORECASE,
+)
+
+# Checked before fuzzy hints; keys are normalized lowercase tokens.
+EXACT_SKILL_CATEGORY: dict[str, str] = {
+    "azure": "backend",
+    "gcp": "backend",
+    "aws": "backend",
+    "s3": "backend",
+    "mlops": "backend",
+    "bigquery": "backend",
+    "docker": "backend",
+    "git": "backend",
+    "fastapi": "backend",
+    "flask": "backend",
+    "rasa": "nlp",
+    "summarization": "nlp",
+    "text classification": "nlp",
+    "supervised learning": "machine learning",
+    "model evaluation": "machine learning",
+    "spacy": "nlp",
+    "nltk": "nlp",
+    "langchain": "nlp",
+    "langgraph": "nlp",
+    "transformers": "nlp",
+    "hugging face": "nlp",
+    "ner": "nlp",
+    "python": "programming",
+    "sql": "programming",
+    "c++": "programming",
+    "pytorch": "machine learning",
+    "tensorflow": "machine learning",
+    "keras": "machine learning",
+    "scikit-learn": "machine learning",
+    "scikit learn": "machine learning",
+    "pandas": "data",
+    "numpy": "data",
+    "matplotlib": "data",
+    "selenium": "data",
+    "beautifulsoup": "data",
+}
+
+# Order matters: cloud/backend is checked before NLP to avoid mis-routing.
+SKILL_CATEGORY_HINTS: dict[str, tuple[str, ...]] = {
+    "programming": ("python", "sql", "c++", "java", "javascript"),
+    "backend": ("fastapi", "flask", "rest api", "rest", "docker", "git", "aws", "gcp", "azure", "mlops", "s3", "bigquery"),
+    "machine learning": ("scikit", "tensorflow", "pytorch", "keras", "forecasting", "lstm", "arima"),
+    "nlp": ("spacy", "nltk", "ner", "transformer", "langchain", "langgraph", "rag", "llm", "generative", "rasa", "summarization", "tokenization", "pos tagging", "sentiment"),
+    "data": ("pandas", "numpy", "matplotlib", "selenium", "beautifulsoup", "etl"),
+}
+
+SKILL_LINE_LABEL_HINTS: dict[str, tuple[str, ...]] = {
+    "programming": ("programming",),
+    "nlp": ("nlp", "generative"),
+    "machine learning": ("machine learning", "deep learning"),
+    "backend": ("backend", "deployment", "cloud"),
+    "data": ("data processing", "tools"),
+}
 
 
 class LatexService:
@@ -54,12 +142,16 @@ class LatexService:
                 continue
             section_cmd = match.group("section_cmd").strip()
             title = match.group("title").strip() or f"Section {idx + 1}"
+            full_body = match.group("body").strip()
+            active_body = LatexService._extract_active_latex(full_body)
             sections.append(
                 {
                     "id": f"section_{idx}",
                     "title": title,
                     "header": f"{section_cmd}{{{title}}}",
-                    "content": match.group("body").strip(),
+                    "content": active_body,
+                    "full_body": full_body,
+                    "commented_body": LatexService._extract_commented_latex(full_body),
                     "start": match.start(),
                     "end": match.end(),
                     "original_block": match.group(0).strip(),
@@ -92,14 +184,61 @@ class LatexService:
         if not selected_sections:
             return {"rewrites": [], "message": "No matching sections selected."}
 
-        prompt = self._build_prompt(selected_sections, jd_text, missing_skills, suggestions)
-        rewritten_sections = await self._rewrite_with_provider(prompt)
+        rewritten_sections: list[dict[str, str]] = []
+        skills_sections = [s for s in selected_sections if "skill" in s["title"].lower()]
+        other_sections = [s for s in selected_sections if "skill" not in s["title"].lower()]
+
+        for section in skills_sections:
+            rewritten_sections.append(
+                {
+                    "id": section["id"],
+                    "title": section["title"],
+                    "content": self._rewrite_skills_deterministic(
+                        section["content"],
+                        missing_skills,
+                    ),
+                }
+            )
+
+        if other_sections:
+            prompt = self._build_prompt(other_sections, jd_text, missing_skills, suggestions)
+            llm_rewrites = await self._rewrite_with_provider(prompt)
+            section_by_id = {s["id"]: s for s in other_sections}
+            for item in llm_rewrites:
+                original = section_by_id.get(item["id"], {})
+                title = item.get("title") or original.get("title", "")
+                item["content"] = self._sanitize_rewrite_content(
+                    item.get("content", ""),
+                    section_title=title,
+                    original_content=original.get("content", ""),
+                    missing_skills=None,
+                )
+                rewritten_sections.append(item)
+
         merged_latex = self._merge_rewrites_into_latex(latex_code, rewritten_sections)
+        skills_only = bool(skills_sections) and not other_sections
+        message = (
+            "Skills updated (original formatting kept; missing skills added by category)."
+            if skills_only
+            else "Sections rewritten successfully."
+        )
         return {
             "rewrites": rewritten_sections,
             "merged_latex": merged_latex,
-            "message": "Sections rewritten successfully.",
+            "message": message,
         }
+
+    @classmethod
+    def _rewrite_skills_deterministic(cls, active_original: str, missing_skills: list[str]) -> str:
+        """Skills: never call the LLM — only add missing JD skills into the user's existing lines."""
+        base = cls._extract_active_latex(active_original)
+        if not base:
+            return base
+        text = base
+        if missing_skills:
+            text = cls._inject_missing_skills(text, missing_skills)
+        text = cls._rebalance_skill_categories(text)
+        return cls._align_skills_line_endings(text, base)
 
     def _merge_rewrites_into_latex(self, latex_code: str, rewrites: list[dict[str, str]]) -> str:
         rewrite_by_id = {item["id"]: item for item in rewrites if "id" in item}
@@ -114,13 +253,10 @@ class LatexService:
                 continue
             rewritten_content = rewrite.get("content", "").strip()
             rewritten_block = f"{section['header']}\n\n{rewritten_content}".strip()
-            replacement = (
-                "% Original section kept for reference\n"
-                f"{self._comment_block(section['original_block'])}\n\n"
-                "% Rewritten section\n"
-                f"{rewritten_block}"
-            )
-            merged = merged[: section["start"]] + replacement + merged[section["end"] :]
+            commented_body = section.get("commented_body", "").strip()
+            if commented_body:
+                rewritten_block = f"{rewritten_block}\n\n{commented_body}"
+            merged = merged[: section["start"]] + rewritten_block + merged[section["end"] :]
         return merged
 
     def build_pdf_preview(self, latex_code: str) -> bytes:
@@ -171,12 +307,37 @@ class LatexService:
             f"[{section['id']}] {section['title']}\n{section['content']}"
             for section in selected_sections
         )
+        has_skills_section = any("skill" in section["title"].lower() for section in selected_sections)
+        skills_rules = ""
+        if has_skills_section:
+            skills_rules = (
+                "Skills section rules (critical):\n"
+                "- Keep the SAME structure as the original: one \\\\textbf{Category:} list per line, ending with \\\\\\\\ before each newline.\n"
+                "- Use \\\\& (backslash-ampersand) between words in category names, never bare &, Ö, or Ð.\n"
+                "- Add each missing skill ONCE, comma-separated on the best-matching existing category line.\n"
+                "- Only add a new \\\\textbf{...} line if the skill truly fits no existing category.\n"
+                "- NEVER repeat a category label before every skill (wrong: 'Cloud X: Azure Cloud X: GCP').\n"
+                "- Use 'Technologies' or 'Tools' in category names, not 'Experience' (e.g. 'Cloud Technologies', not 'Cloud Experience').\n"
+                "- List technologies only (Azure, GCP, Docker), not phrases like 'Cloud Experience: Azure'.\n"
+                "- NEVER remove any skill or technology already in the user's LaTeX; only ADD missing JD skills.\n\n"
+            )
         return (
             "You are an ATS-focused resume editor for LaTeX resumes.\n"
             "Rewrite ONLY the selected sections.\n"
+            "NEVER remove content the user already wrote — only add missing JD skills or lightly rephrase.\n"
             "Keep truthful claims, concise impact bullets, and strong action verbs.\n"
             "Do not invent employers, degrees, dates, or metrics.\n"
-            "Preserve LaTeX formatting compatibility and return valid plain text for section bodies only.\n\n"
+            "Preserve LaTeX formatting compatibility and return valid plain text for section bodies only.\n"
+            "The content field must contain ONLY the active section body — never include \\\\section{...}, \\\\vspace, commented-out lines, or text from other sections.\n"
+            "Never paste job-description paragraphs; output LaTeX commands only (\\\\textbf, \\\\item, \\\\begin, etc.).\n"
+            "When adding missing skills, append them to the best matching existing category line; do not create repetitive label prefixes.\n\n"
+            f"{skills_rules}"
+            "JSON rules (required):\n"
+            "- Return ONLY a JSON object, no markdown fences or commentary.\n"
+            "- Escape every backslash twice in content (e.g. \\\\textbf not \\textbf).\n"
+            "- Use \\n for line breaks inside content strings; do not use raw newlines inside JSON strings.\n"
+            "- In LaTeX text always write \\\\& for ampersands (e.g. 'NLP \\\\& Generative AI').\n"
+            "- Escape double quotes inside content as \\\".\n\n"
             f"Job Description:\n{jd_text}\n\n"
             f"Missing skills to incorporate where accurate: {skills_text}\n\n"
             f"Improvement suggestions:\n{suggestions_text}\n\n"
@@ -227,7 +388,7 @@ class LatexService:
             "model": self.ollama_model,
             "prompt": prompt,
             "stream": False,
-            "format": "json",
+            "format": REWRITE_JSON_SCHEMA,
         }
         async with httpx.AsyncClient(timeout=120) as client:
             try:
@@ -245,7 +406,504 @@ class LatexService:
         return self._parse_rewrites_json(raw_text)
 
     @staticmethod
-    def _parse_rewrites_json(raw_json: str) -> list[dict[str, str]]:
-        parsed = json.loads(raw_json)
+    def _extract_active_latex(content: str) -> str:
+        """Keep only uncommented lines — ignores dead/legacy blocks the user commented out."""
+        active: list[str] = []
+        for line in content.splitlines():
+            if line.strip().startswith("%"):
+                continue
+            active.append(line.rstrip())
+        return re.sub(r"\n{3,}", "\n\n", "\n".join(active)).strip()
+
+    @staticmethod
+    def _extract_commented_latex(content: str) -> str:
+        lines = [line for line in content.splitlines() if line.strip().startswith("%")]
+        return "\n".join(lines).strip()
+
+    @staticmethod
+    def _sanitize_rewrite_content(
+        content: str,
+        section_title: str = "",
+        original_content: str = "",
+        missing_skills: list[str] | None = None,
+    ) -> str:
+        text = LatexService._extract_active_latex(content)
+        if not text:
+            return text
+
+        text = LatexService._strip_section_header_from_body(text, section_title)
+        text = LatexService._truncate_at_next_section_boundary(text)
+        text = LatexService._normalize_escaped_line_breaks(text)
+        text = LatexService._remove_jd_prose_and_invalid_blocks(text)
+        text = LatexService._fix_malformed_latex_fragments(text)
+        text = text.replace(" Ö ", r" \& ").replace(" Ð ", r" \& ")
+        text = text.replace(" ö ", r" \& ").replace(" ð ", r" \& ")
+        text = re.sub(r"(?<!\\)&(?!\\)", r"\\&", text)
+        text = re.sub(r"\\&\\&+", r"\\&", text)
+        text = re.sub(r"\\textbf\{([^}]+?):\s+\}", r"\\textbf{\1:}", text)
+        text = re.sub(r"Cloud\s+Experience", "Cloud Technologies", text, flags=re.IGNORECASE)
+        text = LatexService._collapse_duplicate_category_labels(text)
+        text = LatexService._dedupe_inline_skill_values(text)
+
+        if not text.strip() and original_content:
+            return LatexService._extract_active_latex(original_content)
+
+        return text.rstrip().rstrip("\\").rstrip()
+
+    @staticmethod
+    def _remove_jd_prose_and_invalid_blocks(content: str) -> str:
+        lines: list[str] = []
+        for line in content.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                lines.append("")
+                continue
+            if stripped.startswith("%"):
+                continue
+            if JD_PROSE_RE.search(stripped):
+                continue
+            if "\\" not in stripped and len(stripped) > 60:
+                continue
+            if re.match(r"^[A-Za-z0-9\s&·\-]+:\s*$", stripped):
+                continue
+            if re.match(r"^\\begin\{itemize\}", stripped) and "\\item" not in content:
+                continue
+            if stripped in {r"\resumeSubHeadingListEnd", r"\resumeSubHeadingListStart"}:
+                continue
+            if re.match(r"^\\resumeSubHeadingList(Start|End)\s*\\\\?\s*$", stripped):
+                continue
+            lines.append(line)
+        text = "\n".join(lines)
+        text = re.sub(
+            r"\\begin\{itemize\}[^\n]*\\{1,2}\s*(?=\\textbf)",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+    @staticmethod
+    def _fix_malformed_latex_fragments(content: str) -> str:
+        text = re.sub(r",\s*\\\s+", ", ", content)
+        text = re.sub(r"\bext\{\\&", r"\\textbf{", text)
+        text = re.sub(r"\}\s*\\section\*?\{", r"}\n\n\\section{", text)
+        text = re.sub(r"\\resumeSubHeadingListEnd\s*\\\\", r"\\resumeSubHeadingListEnd", text)
+        text = re.sub(r",?\s*leftmargin=[^,\]]+[^\\]*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r",?\s*itemsep=[^,\]]+", "", text, flags=re.IGNORECASE)
+        text = re.sub(r",?\s*parsep=[^,\]]+", "", text, flags=re.IGNORECASE)
+        return text
+
+    @staticmethod
+    def _is_valid_skill_item(item: str) -> bool:
+        cleaned = item.strip().strip(",").strip()
+        if len(cleaned) < 2:
+            return False
+        if re.search(
+            r"leftmargin|itemsep|parsep|begin\{itemize|resumeSub|textbf\{",
+            cleaned,
+            re.IGNORECASE,
+        ):
+            return False
+        if re.match(r"^[A-Za-z\s&·]+$", cleaned) and cleaned.endswith(":"):
+            return False
+        return True
+
+    @classmethod
+    def _inject_missing_skills(cls, content: str, missing_skills: list[str]) -> str:
+        lines = cls._parse_textbf_skill_lines(content)
+        if not lines:
+            return content
+
+        for skill in missing_skills:
+            skill_l = skill.lower().strip()
+            if not skill_l:
+                continue
+            target_key = cls._pick_skill_category(skill_l)
+            target = cls._find_line_for_skill_category(target_key, lines)
+            if not target:
+                target = max(lines, key=lambda line: len(line["items"]))
+            if cls._skill_on_line(skill, target["items"]):
+                continue
+            target["items"].append(cls._format_skill_token(skill))
+
+        return "\n\n".join(
+            cls._format_textbf_skill_line(line["label"], line["items"], line["suffix"]) for line in lines
+        )
+
+    @staticmethod
+    def _format_skill_token(skill: str) -> str:
+        cleaned = skill.strip()
+        if not cleaned:
+            return cleaned
+        acronyms = {"gcp", "aws", "nlp", "ner", "api", "sql", "etl", "mlops", "llm", "rag"}
+        lowered = cleaned.lower()
+        if lowered in acronyms:
+            return lowered.upper()
+        if cleaned.isupper() and len(cleaned) <= 6:
+            return cleaned
+        if " " in cleaned:
+            return cleaned.title()
+        return cleaned[0].upper() + cleaned[1:]
+
+    @staticmethod
+    def _pick_skill_category(skill: str) -> str:
+        normalized = skill.lower().strip()
+        if normalized in EXACT_SKILL_CATEGORY:
+            return EXACT_SKILL_CATEGORY[normalized]
+        for category, hints in SKILL_CATEGORY_HINTS.items():
+            if any(hint in normalized for hint in hints):
+                return category
+        return "backend"
+
+    @classmethod
+    def _rebalance_skill_categories(cls, content: str) -> str:
+        """Move skills onto the correct \\textbf category line (e.g. Azure -> Backend, not NLP)."""
+        lines = cls._parse_textbf_skill_lines(content)
+        if not lines:
+            return content
+
+        ordered_items: list[str] = []
+        seen: set[str] = set()
+        for line in lines:
+            for item in line["items"]:
+                key = item.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                ordered_items.append(item)
+
+        for line in lines:
+            line["items"] = []
+
+        for item in ordered_items:
+            if not cls._is_valid_skill_item(item):
+                continue
+            category = cls._pick_skill_category(item.lower())
+            target = cls._find_line_for_skill_category(category, lines)
+            if not target:
+                target = lines[0]
+            target["items"].append(item)
+
+        return "\n\n".join(
+            cls._format_textbf_skill_line(line["label"], line["items"], line["suffix"])
+            for line in lines
+            if line["items"]
+        )
+
+    @staticmethod
+    def _skill_on_line(skill: str, line_items: list[str]) -> bool:
+        skill_l = skill.lower()
+        for item in line_items:
+            if skill_l == item.lower():
+                return True
+            if LatexService._skill_item_in_text(skill, item):
+                return True
+        return False
+
+    @staticmethod
+    def _find_line_for_skill_category(category: str, lines: list[dict[str, Any]]) -> dict[str, Any] | None:
+        label_hints = SKILL_LINE_LABEL_HINTS.get(category, (category,))
+        for line in lines:
+            label = line["label_key"]
+            if any(hint in label for hint in label_hints):
+                return line
+        return None
+
+    @staticmethod
+    def _skill_item_in_text(item: str, text: str) -> bool:
+        item_l = item.lower()
+        text_l = text.lower()
+        if item_l in text_l:
+            return True
+        words = [w for w in re.findall(r"[a-z0-9]+", item_l) if len(w) > 2]
+        if not words:
+            return item_l in text_l
+        return sum(1 for word in words if word in text_l) >= max(1, len(words) - 1)
+
+    @staticmethod
+    def _normalize_skill_label(label: str) -> str:
+        return re.sub(r"\s+", " ", label.strip().rstrip(":").lower())
+
+    @staticmethod
+    def _parse_textbf_skill_lines(content: str) -> list[dict[str, Any]]:
+        lines: list[dict[str, Any]] = []
+        for chunk in re.split(r"(?=\\textbf\{)", content):
+            chunk = chunk.strip()
+            if not chunk.startswith(r"\textbf{"):
+                continue
+            match = re.match(
+                r"\\textbf\{(?P<label>[^}]+)\}\s*(?P<values>.*)",
+                chunk,
+                flags=re.DOTALL | re.IGNORECASE,
+            )
+            if not match:
+                continue
+            values = match.group("values").strip()
+            suffix_match = re.search(r"(\\{2,})\s*$", values)
+            suffix = suffix_match.group(1) if suffix_match else r" \\"
+            if suffix_match:
+                values = values[: suffix_match.start()].strip().rstrip(",")
+            items = [
+                part.strip()
+                for part in values.split(",")
+                if part.strip() and LatexService._is_valid_skill_item(part.strip())
+            ]
+            label = match.group("label").strip()
+            lines.append(
+                {
+                    "label": label,
+                    "label_key": LatexService._normalize_skill_label(label),
+                    "items": items,
+                    "suffix": suffix,
+                }
+            )
+        return lines
+
+    @staticmethod
+    def _find_matching_skill_line(
+        label_key: str, lines_by_key: dict[str, dict[str, Any]]
+    ) -> dict[str, Any] | None:
+        if label_key in lines_by_key:
+            return lines_by_key[label_key]
+        for key, line in lines_by_key.items():
+            if key in label_key or label_key in key:
+                return line
+        return None
+
+    @staticmethod
+    def _format_textbf_skill_line(label: str, items: list[str], suffix: str) -> str:
+        clean_label = label.strip().rstrip(":")
+        return f"\\textbf{{{clean_label}:}} {', '.join(items)} {suffix}".rstrip()
+
+    @classmethod
+    def _preserve_user_skills_content(cls, rewritten: str, original: str) -> str:
+        """Keep every skill item from the user's original LaTeX; only add new ones from the rewrite."""
+        orig_lines = cls._parse_textbf_skill_lines(original)
+        if not orig_lines:
+            return cls._preserve_loose_skill_tokens(rewritten, original)
+
+        re_lines = cls._parse_textbf_skill_lines(rewritten)
+        re_by_key = {line["label_key"]: line for line in re_lines}
+        output: list[str] = []
+        matched_re_keys: set[str] = set()
+
+        for orig in orig_lines:
+            re_line = cls._find_matching_skill_line(orig["label_key"], re_by_key)
+            if re_line:
+                matched_re_keys.add(re_line["label_key"])
+
+            label = re_line["label"] if re_line else orig["label"]
+            suffix = re_line["suffix"] if re_line else orig["suffix"]
+            merged_items: list[str] = []
+            seen: set[str] = set()
+
+            for item in orig["items"]:
+                key = item.lower()
+                if key not in seen:
+                    merged_items.append(item)
+                    seen.add(key)
+
+            if re_line:
+                for item in re_line["items"]:
+                    key = item.lower()
+                    if key not in seen:
+                        merged_items.append(item)
+                        seen.add(key)
+
+            output.append(cls._format_textbf_skill_line(label, merged_items, suffix))
+
+        for re_line in re_lines:
+            if re_line["label_key"] in matched_re_keys:
+                continue
+            if any(
+                re_line["label_key"] in ok or ok in re_line["label_key"]
+                for ok in {o["label_key"] for o in orig_lines}
+            ):
+                continue
+            output.append(cls._format_textbf_skill_line(re_line["label"], re_line["items"], re_line["suffix"]))
+
+        result = "\n\n".join(output) if output else rewritten
+        return cls._rebalance_skill_categories(result)
+
+    @staticmethod
+    def _category_for_label(label_key: str) -> str:
+        for category, hints in SKILL_LINE_LABEL_HINTS.items():
+            if any(hint in label_key for hint in hints):
+                return category
+        return ""
+
+    @staticmethod
+    def _preserve_loose_skill_tokens(rewritten: str, original: str) -> str:
+        """Fallback when skills are not structured with \\textbf lines."""
+        rewritten_lower = rewritten.lower()
+        missing_chunks: list[str] = []
+        for chunk in re.split(r",|\n|\\\\", original):
+            token = chunk.strip().strip("%").strip()
+            if len(token) < 3:
+                continue
+            if token.lower() not in rewritten_lower:
+                missing_chunks.append(token)
+        if not missing_chunks:
+            return rewritten
+        return rewritten.rstrip() + "\n\n% Restored from your original resume\n" + ", ".join(missing_chunks)
+
+    @staticmethod
+    def _strip_section_header_from_body(content: str, section_title: str) -> str:
+        if not section_title:
+            return content.strip()
+        pattern = rf"^\\section\*?\{{\s*{re.escape(section_title)}\s*\}}\s*"
+        return re.sub(pattern, "", content, count=1, flags=re.IGNORECASE).lstrip()
+
+    @staticmethod
+    def _truncate_at_next_section_boundary(content: str) -> str:
+        match = NEXT_LATEX_BOUNDARY_RE.search(content)
+        if not match:
+            return content
+        return content[: match.start()].rstrip().rstrip("\\").rstrip()
+
+    @staticmethod
+    def _normalize_escaped_line_breaks(content: str) -> str:
+        """Turn JSON/LaTeX artifacts like \\\\n or \\n into real newlines between skill lines."""
+        text = re.sub(r"\\{2,}n(?![A-Za-z])", "\n", content)
+        text = re.sub(r"(?<!\\)\\n(?![A-Za-z])", "\n", text)
+        return text
+
+    @staticmethod
+    def _collapse_duplicate_category_labels(content: str) -> str:
+        """Merge 'Label: A Label: B' into 'Label: A, B' when the same label repeats."""
+        pattern = re.compile(
+            r"(?P<prefix>(?:\\textbf\{)?)(?P<label>[^}:]+?):\s*"
+            r"(?P<val>[^:]+?)\s+(?P=prefix)(?P=label):\s*",
+            flags=re.IGNORECASE,
+        )
+        changed = True
+        while changed:
+            changed = False
+            match = pattern.search(content)
+            if not match:
+                break
+            prefix = match.group("prefix")
+            label = match.group("label").strip()
+            val = match.group("val").strip().rstrip(",")
+            replacement = f"{prefix}{label}: {val}, "
+            content = content[: match.start()] + replacement + content[match.end() :]
+            changed = True
+        return content
+
+    @staticmethod
+    def _dedupe_inline_skill_values(content: str) -> str:
+        """Remove duplicate comma-separated tokens inside a category value span."""
+        def dedupe_values(match: re.Match[str]) -> str:
+            prefix, label, values = match.group(1), match.group(2), match.group(3)
+            parts = [part.strip() for part in values.split(",") if part.strip()]
+            seen: set[str] = set()
+            unique: list[str] = []
+            for part in parts:
+                key = part.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                unique.append(part)
+            return f"{prefix}{label}: {', '.join(unique)}"
+
+        return re.sub(
+            r"((?:\\textbf\{)?)([^}:]+?):\s*([^\\]+?)(?=\\\\|\n|\Z)",
+            dedupe_values,
+            content,
+            flags=re.IGNORECASE,
+        )
+
+    @staticmethod
+    def _align_skills_line_endings(content: str, original_content: str) -> str:
+        """Ensure skill lines end with LaTeX line breaks like the source section."""
+        original_uses_double_slash = "\\\\" in original_content
+        lines = [line.strip() for line in content.splitlines() if line.strip()]
+        normalized: list[str] = []
+        for line in lines:
+            if line.startswith("%"):
+                normalized.append(line)
+                continue
+            line = line.rstrip()
+            if original_uses_double_slash:
+                line = line.rstrip("\\").rstrip()
+                if not line.endswith("\\\\"):
+                    line = f"{line} \\\\"
+            normalized.append(line)
+        return "\n\n".join(normalized)
+
+    @staticmethod
+    def _extract_json_payload(raw_text: str) -> str:
+        text = raw_text.strip()
+        if not text:
+            return "{}"
+        fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
+        if fence_match:
+            text = fence_match.group(1).strip()
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            text = text[start : end + 1]
+        return text
+
+    @staticmethod
+    def _coerce_rewrites(parsed: Any) -> list[dict[str, str]]:
+        if not isinstance(parsed, dict):
+            return []
         rewrites = parsed.get("rewrites", [])
-        return [r for r in rewrites if all(k in r for k in ("id", "title", "content"))]
+        if not isinstance(rewrites, list):
+            return []
+        return [
+            {
+                "id": str(item["id"]),
+                "title": str(item["title"]),
+                "content": str(item["content"]),
+            }
+            for item in rewrites
+            if isinstance(item, dict) and all(k in item for k in ("id", "title", "content"))
+        ]
+
+    @classmethod
+    def _parse_rewrites_json(cls, raw_json: str) -> list[dict[str, str]]:
+        payload = cls._extract_json_payload(raw_json)
+        last_error: json.JSONDecodeError | None = None
+        for candidate in (payload, repair_json(payload)):
+            try:
+                parsed = json.loads(candidate)
+            except json.JSONDecodeError as exc:
+                last_error = exc
+                continue
+            rewrites = cls._coerce_rewrites(parsed)
+            if rewrites:
+                return rewrites
+
+        fallback = cls._parse_rewrites_fallback(payload)
+        if fallback:
+            return fallback
+
+        hint = (
+            "The AI response was not valid JSON (often caused by LaTeX backslashes or unescaped newlines). "
+            "Try rewriting one section at a time, simplify LaTeX in that section, or use OpenAI in .env."
+        )
+        if last_error:
+            raise ValueError(f"{hint} Details: {last_error}") from last_error
+        raise ValueError(f"{hint} No rewrites could be parsed.")
+
+    @staticmethod
+    def _parse_rewrites_fallback(text: str) -> list[dict[str, str]]:
+        """Extract rewrite objects when the outer JSON envelope is broken."""
+        rewrites: list[dict[str, str]] = []
+        for match in re.finditer(
+            r'"id"\s*:\s*"(?P<id>[^"\\]*(?:\\.[^"\\]*)*)"\s*,\s*'
+            r'"title"\s*:\s*"(?P<title>[^"\\]*(?:\\.[^"\\]*)*)"\s*,\s*'
+            r'"content"\s*:\s*"(?P<content>(?:[^"\\]|\\.)*)"\s*\}',
+            text,
+            flags=re.DOTALL,
+        ):
+            rewrites.append(
+                {
+                    "id": bytes(match.group("id"), "utf-8").decode("unicode_escape"),
+                    "title": bytes(match.group("title"), "utf-8").decode("unicode_escape"),
+                    "content": bytes(match.group("content"), "utf-8").decode("unicode_escape"),
+                }
+            )
+        return rewrites

@@ -29,5 +29,8 @@ class MatcherService:
             )
             score = round(0.7 * overlap_score + 0.3 * semantic_score, 2)
 
-        suggestions = [f'Add project bullet showing {s}' for s in missing[:8]]
+        suggestions = [
+            f'Add "{s}" to the best matching skills/tools category (comma-separated, no repeated labels)'
+            for s in missing[:8]
+        ]
         return MatchResult(score, matched, missing, suggestions)

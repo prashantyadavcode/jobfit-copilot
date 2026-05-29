@@ -161,7 +161,14 @@ rewriteBtn.addEventListener('click', async () => {
       }),
     });
     if (!res.ok) {
-      const message = await res.text();
+      const raw = await res.text();
+      let message = raw;
+      try {
+        const err = JSON.parse(raw);
+        message = typeof err.detail === 'string' ? err.detail : raw;
+      } catch {
+        // keep raw body
+      }
       throw new Error(message);
     }
     const data = await res.json();
