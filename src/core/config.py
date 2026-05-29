@@ -1,6 +1,13 @@
+import os
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _default_llm_provider() -> str:
+    if os.getenv('VERCEL'):
+        return 'openai'
+    return 'ollama'
 
 
 class Settings(BaseSettings):
@@ -10,7 +17,7 @@ class Settings(BaseSettings):
     log_level: str = 'INFO'
     spacy_model: str = 'en_core_web_sm'
     match_threshold: float = 55.0
-    llm_provider: str = 'ollama'
+    llm_provider: str = _default_llm_provider()
     ollama_base_url: str = 'http://127.0.0.1:11434'
     ollama_model: str = 'llama3.2:3b'
     latex_compiler: str = 'pdflatex'

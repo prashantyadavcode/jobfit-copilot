@@ -1,13 +1,9 @@
 import re
 from collections import Counter
 
-import nltk
 import spacy
 
 from src.utils.text_utils import clean_text
-
-for pkg in ('punkt', 'stopwords'):
-    nltk.download(pkg, quiet=True)
 
 SKILL_KEYWORDS = {
     'python', 'sql', 'fastapi', 'flask', 'spacy', 'nltk', 'pytorch', 'tensorflow',
