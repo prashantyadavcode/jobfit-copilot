@@ -1,7 +1,81 @@
 const analyzeBtn = document.getElementById('analyzeBtn');
 const resumeFile = document.getElementById('resumeFile');
+const resumeDropZone = document.getElementById('resumeDropZone');
+const resumeFileName = document.getElementById('resumeFileName');
 const jdText = document.getElementById('jdText');
 const statusEl = document.getElementById('status');
+
+const ACCEPTED_RESUME_EXTENSIONS = ['.pdf', '.docx', '.txt'];
+
+function isAcceptedResumeFile(file) {
+  const name = (file?.name || '').toLowerCase();
+  return ACCEPTED_RESUME_EXTENSIONS.some((ext) => name.endsWith(ext));
+}
+
+function setResumeFile(file) {
+  if (!file || !isAcceptedResumeFile(file)) {
+    statusEl.textContent = 'Only PDF, DOCX, and TXT files are accepted.';
+    return;
+  }
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  resumeFile.files = dt.files;
+  resumeDropZone.classList.add('has-file');
+  resumeFileName.textContent = file.name;
+  resumeFileName.classList.remove('hidden');
+  statusEl.textContent = '';
+  updateAnalyzeFormState();
+}
+
+resumeDropZone.addEventListener('click', () => resumeFile.click());
+
+resumeDropZone.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    resumeFile.click();
+  }
+});
+
+resumeFile.addEventListener('change', () => {
+  const file = resumeFile.files[0];
+  if (file) setResumeFile(file);
+});
+
+['dragenter', 'dragover'].forEach((eventName) => {
+  resumeDropZone.addEventListener(eventName, (e) => {
+    e.preventDefault();
+    resumeDropZone.classList.add('is-dragover');
+  });
+});
+
+resumeDropZone.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  if (!resumeDropZone.contains(e.relatedTarget)) {
+    resumeDropZone.classList.remove('is-dragover');
+  }
+});
+
+resumeDropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  resumeDropZone.classList.remove('is-dragover');
+  const file = e.dataTransfer?.files?.[0];
+  if (file) setResumeFile(file);
+});
+
+const matchResultPanel = document.getElementById('matchResultPanel');
+
+function isAnalyzeFormReady() {
+  return resumeFile.files.length > 0 && jdText.value.trim().length > 0;
+}
+
+function updateAnalyzeFormState() {
+  const ready = isAnalyzeFormReady();
+  analyzeBtn.disabled = !ready;
+  analyzeBtn.classList.toggle('btn-ocean', ready);
+}
+
+jdText.addEventListener('input', updateAnalyzeFormState);
+
 const scoreEl = document.getElementById('score');
 const summaryEl = document.getElementById('summary');
 const matchedEl = document.getElementById('matched');
@@ -13,6 +87,27 @@ const rewriteBtn = document.getElementById('rewriteBtn');
 const latexStatusEl = document.getElementById('latexStatus');
 const sectionContainer = document.getElementById('sectionContainer');
 const rewriteOutputEl = document.getElementById('rewriteOutput');
+const downloadLatexBtn = document.getElementById('downloadLatexBtn');
+const downloadRewriteBtn = document.getElementById('downloadRewriteBtn');
+
+function downloadTextFile(content, filename) {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function updateDownloadButtons() {
+  if (downloadLatexBtn) {
+    downloadLatexBtn.disabled = !latexCodeEl.value.trim();
+  }
+  if (downloadRewriteBtn) {
+    downloadRewriteBtn.disabled = !rewriteOutputEl.value.trim();
+  }
+}
 
 let latestAnalysis = null;
 let extractedSections = [];
@@ -44,12 +139,13 @@ analyzeBtn.addEventListener('click', async () => {
     const data = await res.json();
     latestAnalysis = data;
 
-    scoreEl.textContent = `Score: ${data.score}%`;
+    scoreEl.textContent = `${data.score}%`;
     summaryEl.textContent = `${data.matched_skills.length} matched skills · ${data.missing_skills.length} missing skills`;
     renderList(matchedEl, data.matched_skills);
     renderList(missingEl, data.missing_skills);
     renderList(suggestionsEl, data.suggestions);
     statusEl.textContent = 'Done.';
+    matchResultPanel.classList.remove('hidden');
     latexPanel.classList.remove('hidden');
   } catch (e) {
     statusEl.textContent = `Error: ${e.message}`;
@@ -87,6 +183,7 @@ function getSelectedSectionIds() {
 function updateRewriteButtonState() {
   const hasSelectedSections = getSelectedSectionIds().length > 0;
   rewriteBtn.disabled = !hasSelectedSections;
+  rewriteBtn.classList.toggle('btn-ocean', hasSelectedSections);
 }
 
 async function extractSectionsFromLatex() {
@@ -95,6 +192,7 @@ async function extractSectionsFromLatex() {
     extractedSections = [];
     sectionContainer.innerHTML = '';
     rewriteBtn.disabled = true;
+    rewriteBtn.classList.remove('btn-ocean');
     latexStatusEl.textContent = 'Paste LaTeX code to auto-extract sections.';
     return;
   }
@@ -115,11 +213,13 @@ async function extractSectionsFromLatex() {
       : 'No sections found. Ensure your LaTeX uses \\section{...}.';
   } catch (e) {
     rewriteBtn.disabled = true;
+    rewriteBtn.classList.remove('btn-ocean');
     latexStatusEl.textContent = `Error: ${e.message}`;
   }
 }
 
 latexCodeEl.addEventListener('input', () => {
+  updateDownloadButtons();
   if (extractTimer) {
     clearTimeout(extractTimer);
   }
@@ -128,9 +228,21 @@ latexCodeEl.addEventListener('input', () => {
   }, 400);
 });
 
+downloadLatexBtn.addEventListener('click', () => {
+  const content = latexCodeEl.value.trim();
+  if (!content) return;
+  downloadTextFile(content, 'resume.tex');
+});
+
+downloadRewriteBtn.addEventListener('click', () => {
+  const content = rewriteOutputEl.value.trim();
+  if (!content) return;
+  downloadTextFile(content, 'resume_rewritten.tex');
+});
+
 rewriteBtn.addEventListener('click', async () => {
   if (!latestAnalysis) {
-    latexStatusEl.textContent = 'Run Step 1 analysis first.';
+    latexStatusEl.textContent = 'Run Analyze Match first.';
     return;
   }
 
@@ -174,6 +286,7 @@ rewriteBtn.addEventListener('click', async () => {
     }
     const data = await res.json();
     rewriteOutputEl.value = data.merged_latex || 'No merged LaTeX returned.';
+    updateDownloadButtons();
     latexStatusEl.textContent = data.message || 'Rewrite complete.';
   } catch (e) {
     latexStatusEl.textContent = `Error: ${e.message}`;

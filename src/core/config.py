@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', extra='ignore')
-    app_name: str = 'Resume Matcher + JD Analyzer'
+    app_name: str = 'JobFit Copilot'
     app_env: str = 'development'
     log_level: str = 'INFO'
     spacy_model: str = 'en_core_web_sm'

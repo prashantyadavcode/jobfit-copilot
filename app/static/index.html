@@ -3,68 +3,123 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Resume Matcher + JD Analyzer</title>
+  <title>JobFit Copilot</title>
+  <link rel="icon" type="image/png" href="/static/favicon.png" />
+  <link rel="apple-touch-icon" href="/static/favicon.png" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
+  <header class="taskbar">
+    <div class="taskbar-inner">
+      <div class="taskbar-left">
+        <h1 class="taskbar-title">JobFit Copilot</h1>
+        <p class="taskbar-subtitle">Analyze resume-job fit, then rewrite selected LaTeX resume sections for better ATS alignment.</p>
+      </div>
+      <p class="taskbar-credit">Created by Prashant</p>
+    </div>
+  </header>
+
   <main class="container">
-    <header class="hero card">
-      <h1>Resume Matcher + JD Analyzer</h1>
-      <p class="muted">Analyze resume-job fit, then rewrite selected LaTeX resume sections for better ATS alignment.</p>
-    </header>
+    <section class="card panel-card">
+      <header class="panel-card-header">
+        <h2 class="panel-card-title">Analyze Match</h2>
+        <p class="panel-card-lead">Upload your resume and paste the job description to see how well you align.</p>
+      </header>
 
-    <section class="card">
-      <h2>Step 1 - Analyze Match</h2>
-      <div class="field">
-        <label for="resumeFile">Resume (PDF/DOCX/TXT)</label>
-        <input id="resumeFile" type="file" accept=".pdf,.docx,.txt" />
-      </div>
-
-      <div class="field">
-        <label for="jdText">Job Description</label>
-        <textarea id="jdText" rows="10" placeholder="Paste job description here..."></textarea>
-      </div>
-
-      <button id="analyzeBtn">Analyze Match</button>
-      <p id="status" class="muted"></p>
-    </section>
-
-    <section class="card">
-      <h2>Match Result</h2>
-      <p id="score" class="score-pill">Score: -</p>
-      <p id="summary" class="muted"></p>
-      <div class="grid">
-        <div class="subcard">
-          <h3>Matched Skills</h3>
-          <ul id="matched"></ul>
+      <div class="panel-card-body">
+        <div class="panel-field">
+          <div class="field-label-row">
+            <label class="field-label" for="resumeFile">Add your Resume</label>
+            <span class="field-hint">(PDF/DOCX/TXT) are only accepted</span>
+          </div>
+          <div id="resumeDropZone" class="resume-dropzone" tabindex="0" role="button" aria-label="Upload resume">
+            <input id="resumeFile" type="file" accept=".pdf,.docx,.txt" hidden />
+            <span class="dropzone-icon" aria-hidden="true">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 16V4M12 4L8 8M12 4L16 8" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M4 17v1a3 3 0 003 3h10a3 3 0 003-3v-1" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <p class="dropzone-primary">Click to choose a file or drag &amp; drop here</p>
+            <p class="dropzone-secondary">Maximum one file per analysis</p>
+            <p id="resumeFileName" class="dropzone-filename hidden"></p>
+          </div>
         </div>
-        <div class="subcard">
-          <h3>Missing Skills</h3>
-          <ul id="missing"></ul>
+
+        <div class="panel-field">
+          <label class="field-label" for="jdText">Job Description</label>
+          <textarea id="jdText" class="panel-textarea" rows="9" placeholder="Paste the full job description here…"></textarea>
         </div>
-      </div>
-      <div class="subcard">
-        <h3>Improvement Suggestions</h3>
-        <ul id="suggestions"></ul>
+
+        <div class="panel-actions">
+          <button id="analyzeBtn" class="panel-btn" type="button" disabled>Analyze Match</button>
+          <p id="status" class="panel-status" aria-live="polite"></p>
+        </div>
       </div>
     </section>
 
-    <section id="latexPanel" class="card hidden">
-      <h2>Step 2 - Improve Selected LaTeX Sections</h2>
-      <p class="muted">Paste your LaTeX resume code. Sections are extracted automatically; then select what to improve.</p>
+    <section id="matchResultPanel" class="card panel-card hidden">
+      <header class="panel-card-header">
+        <h2 class="panel-card-title">Match Result</h2>
+        <p class="panel-card-lead">How your resume aligns with the job description.</p>
+      </header>
 
-      <div class="field">
-        <label for="latexCode">LaTeX Resume Code</label>
-        <textarea id="latexCode" rows="12" placeholder="Paste full LaTeX source..."></textarea>
+      <div class="panel-card-body">
+        <div class="match-hero">
+          <div class="match-score-block">
+            <span class="match-score-label">Match Score</span>
+            <p id="score" class="match-score-value">—</p>
+          </div>
+          <p id="summary" class="match-summary"></p>
+        </div>
+
+        <div class="match-grid">
+          <div class="panel-subcard panel-subcard--matched">
+            <h3 class="panel-subcard-title">Matched Skills</h3>
+            <ul id="matched" class="skill-list skill-list--matched"></ul>
+          </div>
+          <div class="panel-subcard panel-subcard--missing">
+            <h3 class="panel-subcard-title">Missing Skills</h3>
+            <ul id="missing" class="skill-list skill-list--missing"></ul>
+          </div>
+        </div>
+
+        <div class="panel-subcard panel-subcard--suggestions">
+          <h3 class="panel-subcard-title">Improvement Suggestions</h3>
+          <ul id="suggestions" class="suggestion-list"></ul>
+        </div>
       </div>
+    </section>
 
-      <button id="rewriteBtn" disabled>Rewrite Selected Sections</button>
+    <section id="latexPanel" class="card panel-card hidden">
+      <header class="panel-card-header">
+        <h2 class="panel-card-title">Improve Selected LaTeX Sections</h2>
+        <p class="panel-card-lead">Paste your LaTeX resume code. Sections are extracted automatically; then select what to improve.</p>
+      </header>
 
-      <p id="latexStatus" class="muted"></p>
-      <div id="sectionContainer" class="section-list"></div>
-      <div class="field">
-        <label for="rewriteOutput">Rewritten Section Content</label>
-        <textarea id="rewriteOutput" rows="12" readonly placeholder="Rewritten sections will appear here..."></textarea>
+      <div class="panel-card-body">
+        <div class="panel-field">
+          <div class="field-label-row">
+            <label class="field-label" for="latexCode">LaTeX Resume Code</label>
+            <button type="button" id="downloadLatexBtn" class="btn-download" disabled>Download .tex</button>
+          </div>
+          <textarea id="latexCode" class="panel-textarea" rows="12" placeholder="Paste full LaTeX source…"></textarea>
+        </div>
+
+        <p id="latexStatus" class="latex-status"></p>
+        <div id="sectionContainer" class="section-list"></div>
+
+        <div class="panel-actions">
+          <button id="rewriteBtn" class="panel-btn" type="button" disabled>Rewrite Selected Sections</button>
+        </div>
+
+        <div class="panel-field panel-field--spaced">
+          <div class="field-label-row">
+            <label class="field-label" for="rewriteOutput">Rewritten Section Content</label>
+            <button type="button" id="downloadRewriteBtn" class="btn-download" disabled>Download .tex</button>
+          </div>
+          <textarea id="rewriteOutput" class="panel-textarea panel-textarea--readonly" rows="12" readonly placeholder="Rewritten sections will appear here…"></textarea>
+        </div>
       </div>
     </section>
   </main>

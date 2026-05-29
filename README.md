@@ -1,4 +1,4 @@
-# Resume Matcher + JD Analyzer
+# JobFit Copilot
 
 Interview-ready NLP project that analyzes resume-job fit using skills extraction, entity recognition, keyword overlap, and semantic term similarity.
 
@@ -9,6 +9,28 @@ Interview-ready NLP project that analyzes resume-job fit using skills extraction
 - Missing skills and actionable resume rewrite suggestions
 - LaTeX resume section extraction and targeted rewrite flow using local Ollama (free)
 - FastAPI backend + built-in frontend at `/`
+
+## UI Walkthrough
+
+### Step 1 — Analyze Match
+Upload your resume and paste the job description, then run the match analysis.
+
+![Step 1 — Analyze Match](ui-steps/Step%201%20-%20Analyze%20Match.png)
+
+### Step 2 — Match Results
+Review your fit score, matched skills, gaps, and improvement suggestions.
+
+![Step 2 — Match Results](ui-steps/Step%202%20-%20Match%20Results.png)
+
+### Step 3 — Add LaTeX Resume Code
+Paste your LaTeX source and select the sections you want to improve.
+
+![Step 3 — Adding LaTeX Code](ui-steps/Step%203%20-%20Adding%20LatexCode.png)
+
+### Step 4 — Improved LaTeX Output
+Rewrite selected sections and download the updated `.tex` file.
+
+![Step 4 — Improved LaTeX Code](ui-steps/Step%204%20-%20Improved%20LatexCode.png)
 
 ## Run
 ```bash
