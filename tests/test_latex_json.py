@@ -210,6 +210,38 @@ def test_sanitize_falls_back_to_original_for_broken_education_llm_output():
     assert r"\&" in fixed
 
 
+def test_leading_section_divider_comment_is_preserved_before_education():
+    latex = r"""
+\section{Summary}
+Hello
+
+%-----------EDUCATION-----------------
+\section{Education}
+\vspace{5pt}
+\textbf{University} \hfill {City} \\
+""".strip()
+
+    service = LatexService(
+        llm_provider="ollama",
+        ollama_base_url="http://127.0.0.1:11434",
+        ollama_model="llama3.2:3b",
+        latex_compiler="pdflatex",
+        openai_api_key=None,
+        openai_model="gpt-4.1-mini",
+    )
+    rewrites = [
+        {"id": "section_0", "title": "Summary", "content": "Hello updated"},
+        {
+            "id": "section_1",
+            "title": "Education",
+            "content": r"\vspace{5pt}\n\textbf{University} \hfill {City} \\",
+        },
+    ]
+    merged = service._merge_rewrites_into_latex(latex, rewrites)
+    assert "%-----------EDUCATION-----------------" in merged
+    assert merged.index("%-----------EDUCATION-----------------") < merged.index(r"\section{Education}")
+
+
 def test_deterministic_skills_preserves_textbf_format():
     original = (
         r"\textbf{Programming:} Python, SQL, C++ \\"

@@ -195,6 +195,7 @@ class LatexService:
                 continue
             section_cmd = match.group("section_cmd").strip()
             title = match.group("title").strip() or f"Section {idx + 1}"
+            leading_comments = LatexService._extract_leading_comment_block(latex_code, match.start())
             full_body = match.group("body").strip()
             active_body = LatexService._extract_active_latex(full_body)
             sections.append(
@@ -205,6 +206,7 @@ class LatexService:
                     "content": active_body,
                     "full_body": full_body,
                     "commented_body": LatexService._extract_commented_latex(full_body),
+                    "leading_comments": leading_comments,
                     "start": match.start(),
                     "end": match.end(),
                     "original_block": match.group(0).strip(),
@@ -249,10 +251,19 @@ class LatexService:
             for s in selected_sections
             if self._is_experience_section(s["title"]) and s not in preserve_sections
         ]
+        projects_sections = [
+            s
+            for s in selected_sections
+            if self._is_projects_section(s["title"])
+            and s not in preserve_sections
+            and s not in experience_sections
+        ]
         other_sections = [
             s
             for s in selected_sections
-            if s not in preserve_sections and s not in experience_sections
+            if s not in preserve_sections
+            and s not in experience_sections
+            and s not in projects_sections
         ]
 
         for section in preserve_sections:
@@ -282,6 +293,19 @@ class LatexService:
                 }
             )
 
+        for section in projects_sections:
+            rewritten_sections.append(
+                {
+                    "id": section["id"],
+                    "title": section["title"],
+                    "content": self._rewrite_projects_enhanced(
+                        section["content"],
+                        missing_skills,
+                        matched_skills,
+                    ),
+                }
+            )
+
         if other_sections:
             prompt = self._build_prompt(other_sections, jd_text, missing_skills, suggestions)
             llm_rewrites = await self._rewrite_with_provider(prompt)
@@ -299,7 +323,7 @@ class LatexService:
 
         merged_latex = self._merge_rewrites_into_latex(latex_code, rewritten_sections)
         message = self._rewrite_status_message(
-            preserve_sections, experience_sections, other_sections
+            preserve_sections, experience_sections, projects_sections, other_sections
         )
         return {
             "rewrites": rewritten_sections,
@@ -315,6 +339,11 @@ class LatexService:
     @staticmethod
     def _is_experience_section(title: str) -> bool:
         return "experience" in title.lower()
+
+    @staticmethod
+    def _is_projects_section(title: str) -> bool:
+        lowered = title.lower()
+        return "projects" in lowered or "project" in lowered
 
     @classmethod
     def _rewrite_section_deterministic(
@@ -374,6 +403,7 @@ class LatexService:
     def _rewrite_status_message(
         preserve_sections: list[dict[str, Any]],
         experience_sections: list[dict[str, Any]],
+        projects_sections: list[dict[str, Any]],
         other_sections: list[dict[str, Any]],
     ) -> str:
         titles = [s["title"].lower() for s in preserve_sections]
@@ -384,9 +414,94 @@ class LatexService:
             parts.append("education preserved (LaTeX-safe)")
         if experience_sections:
             parts.append("experience bullets updated (JD skills added and highlighted)")
+        if projects_sections:
+            parts.append("projects bullets updated (JD skills added and highlighted)")
         if other_sections:
             parts.append("other sections rewritten with AI")
         return "; ".join(parts).capitalize() + "." if parts else "Sections rewritten successfully."
+
+    @classmethod
+    def _rewrite_projects_enhanced(
+        cls,
+        active_original: str,
+        missing_skills: list[str],
+        matched_skills: list[str],
+    ) -> str:
+        """
+        Projects: preserve LaTeX/macros; update bullet-like lines by adding + highlighting skills.
+
+        Supports:
+        - \\item ...
+        - \\resumeItem{...}{...}
+        - \\resumeSubItem{...}{...}
+        """
+        base = cls._extract_active_latex(active_original)
+        if not base:
+            return base
+
+        remaining = [s for s in missing_skills if s.strip()]
+        lines = base.splitlines()
+        output: list[str] = []
+
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("\\item"):
+                enhanced, remaining = cls._enhance_experience_bullet(
+                    line,
+                    remaining,
+                    matched_skills,
+                    max_additions=2,
+                )
+                output.append(enhanced)
+                continue
+
+            macro_enhanced = cls._enhance_two_arg_macro_line(
+                line,
+                remaining,
+                matched_skills,
+                macros=("resumeItem", "resumeSubItem"),
+            )
+            if macro_enhanced is not None:
+                new_line, remaining = macro_enhanced
+                output.append(new_line)
+                continue
+
+            output.append(line)
+
+        return "\n".join(output)
+
+    @classmethod
+    def _enhance_two_arg_macro_line(
+        cls,
+        line: str,
+        missing_skills: list[str],
+        matched_skills: list[str],
+        macros: tuple[str, ...],
+    ) -> tuple[str, list[str]] | None:
+        """
+        Enhance a line like \\resumeSubItem{Title}{Description}.
+        Only touches the second argument (description).
+        """
+        stripped = line.strip()
+        for macro in macros:
+            pattern = re.compile(
+                rf"(\\{macro}\{{(?P<title>[^}}]*)\}}\{{)(?P<body>.*?)(\}}\s*)$"
+            )
+            m = pattern.match(stripped)
+            if not m:
+                continue
+            body = m.group("body")
+            fake_item = "\\item " + body
+            enhanced_item, remaining = cls._enhance_experience_bullet(
+                fake_item,
+                missing_skills,
+                matched_skills,
+                max_additions=2,
+            )
+            enhanced_body = enhanced_item[len("\\item ") :]
+            new_line = f"{m.group(1)}{enhanced_body}{m.group(4)}"
+            return new_line, remaining
+        return None
 
     @classmethod
     def _rewrite_education_deterministic(cls, active_original: str, jd_text: str) -> str:
@@ -565,12 +680,50 @@ class LatexService:
             if not rewrite:
                 continue
             rewritten_content = rewrite.get("content", "").strip()
+            leading_comments = (section.get("leading_comments") or "").rstrip()
             rewritten_block = f"{section['header']}\n\n{rewritten_content}".strip()
+            if leading_comments:
+                rewritten_block = f"{leading_comments}\n{rewritten_block}".strip()
             commented_body = section.get("commented_body", "").strip()
             if commented_body:
                 rewritten_block = f"{rewritten_block}\n\n{commented_body}"
             merged = merged[: section["start"]] + rewritten_block + merged[section["end"] :]
         return merged
+
+    @staticmethod
+    def _extract_leading_comment_block(latex_code: str, section_start: int) -> str:
+        """
+        Capture consecutive comment lines immediately preceding a \\section{...}.
+
+        This prevents section divider comments like:
+          %-----------EDUCATION-----------------
+        from being "eaten" by the previous section when we rewrite in-place.
+        """
+        if section_start <= 0:
+            return ""
+        before = latex_code[:section_start]
+        lines = before.splitlines()
+        if not lines:
+            return ""
+
+        collected: list[str] = []
+        i = len(lines) - 1
+        # Allow blank lines between comments and the section.
+        while i >= 0 and lines[i].strip() == "":
+            collected.append(lines[i])
+            i -= 1
+        while i >= 0 and lines[i].lstrip().startswith("%"):
+            collected.append(lines[i])
+            i -= 1
+            while i >= 0 and lines[i].strip() == "":
+                collected.append(lines[i])
+                i -= 1
+
+        block = "\n".join(reversed(collected)).rstrip()
+        # Only keep "divider-like" blocks to avoid pulling normal comments from previous content.
+        if not re.search(r"%\s*-{3,}|%\s*={3,}|%.*EDUCATION|%.*EXPERIENCE|%.*PROJECT", block, re.IGNORECASE):
+            return ""
+        return block
 
     def build_pdf_preview(self, latex_code: str) -> bytes:
         compiler = shutil.which(self.latex_compiler)
