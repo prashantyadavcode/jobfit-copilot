@@ -2,76 +2,6 @@
 
 Interview-ready NLP project that analyzes resume-job fit using skills extraction, entity recognition, keyword overlap, and semantic term similarity.
 
-## Tech Stack & Skills
-
-Every technology and technique used in this project:
-
-### Languages
-- ✅ Python
-- ✅ JavaScript (ES6+)
-- ✅ HTML5
-- ✅ CSS3
-- ✅ LaTeX
-
-### Backend & API
-- ✅ FastAPI
-- ✅ Uvicorn
-- ✅ Pydantic
-- ✅ Pydantic Settings
-- ✅ REST API design
-- ✅ Multipart file uploads
-- ✅ httpx (async HTTP client)
-
-### NLP & Text Processing
-- ✅ spaCy (`en_core_web_sm`)
-- ✅ NLTK
-- ✅ Named Entity Recognition (NER)
-- ✅ Skill & keyword extraction
-- ✅ Lemmatization & tokenization
-- ✅ RapidFuzz (fuzzy / semantic term matching)
-- ✅ Regular expressions (regex)
-
-### LLM & AI
-- ✅ Ollama (local LLM — Llama 3.2)
-- ✅ OpenAI API (optional provider)
-- ✅ LLM prompt engineering
-- ✅ JSON parsing & repair (`json-repair`)
-
-### Document Processing
-- ✅ PDF parsing (`pdfplumber`)
-- ✅ DOCX parsing (`python-docx`)
-- ✅ Plain-text resume ingestion
-
-### Frontend
-- ✅ Vanilla JavaScript
-- ✅ Responsive UI (CSS)
-- ✅ Drag-and-drop file upload
-- ✅ Fetch API & async UI workflows
-
-### LaTeX & Resume Automation
-- ✅ LaTeX section extraction
-- ✅ Deterministic rewrites (Skills, Education, Experience, Projects)
-- ✅ LLM-assisted section rewrites
-- ✅ LaTeX sanitization & merge pipeline
-- ✅ `.tex` file download
-
-### Testing
-- ✅ pytest
-- ✅ Unit tests (matcher, LaTeX JSON, health endpoints)
-
-### Tools & DevOps
-- ✅ Git & GitHub
-- ✅ Python virtual environments (`venv`)
-- ✅ `pip` dependency management
-- ✅ Environment configuration (`.env`)
-
-### Concepts & Techniques
-- ✅ Resume–job description fit scoring
-- ✅ Skill overlap analysis
-- ✅ Missing-skill detection
-- ✅ ATS-focused resume optimization
-- ✅ Explainable NLP matching pipeline
-
 ## Features
 - Upload resume (PDF/DOCX/TXT) + paste JD
 - Skill extraction using spaCy + curated NLP/ML skill dictionary
@@ -130,3 +60,25 @@ Open: http://localhost:8000/
 - Production API design with file ingestion
 - Practical model outputs with explainable matching
 - Deployment-ready structure
+
+## Tech Stack & Skills
+
+**Languages** — Python, JavaScript, HTML, CSS, LaTeX
+
+**Backend & API** — FastAPI, Uvicorn, Pydantic, REST API, Multipart uploads, httpx
+
+**NLP & Text Processing** — spaCy, NLTK, NER, Skill extraction, Lemmatization, RapidFuzz, Regex
+
+**LLM & AI** — Ollama (Llama 3.2), OpenAI API, Prompt engineering, json-repair
+
+**Document Processing** — pdfplumber, python-docx, TXT ingestion
+
+**Frontend** — Vanilla JavaScript, Responsive CSS, Drag-and-drop upload, Fetch API
+
+**LaTeX & Resume Automation** — Section parsing, Deterministic rewrites, LLM rewrites, LaTeX sanitization, `.tex` download
+
+**Testing** — pytest, Unit tests (matcher, LaTeX JSON, health)
+
+**Tools & DevOps** — Git, GitHub, venv, pip, `.env` configuration
+
+**Concepts** — Resume–JD fit scoring, Skill overlap, Missing-skill detection, ATS optimization, Explainable NLP pipeline
