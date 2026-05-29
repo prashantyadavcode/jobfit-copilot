@@ -24,4 +24,5 @@ class LatexRewriteRequest(BaseModel):
     selected_section_ids: list[str] = Field(default_factory=list)
     jd_text: str = Field(..., min_length=30)
     missing_skills: list[str] = Field(default_factory=list)
+    matched_skills: list[str] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)

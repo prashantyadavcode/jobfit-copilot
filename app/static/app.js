@@ -157,6 +157,7 @@ rewriteBtn.addEventListener('click', async () => {
         selected_section_ids: selectedSectionIds,
         jd_text: jdText.value,
         missing_skills: latestAnalysis.missing_skills || [],
+        matched_skills: latestAnalysis.matched_skills || [],
         suggestions: latestAnalysis.suggestions || [],
       }),
     });

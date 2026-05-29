@@ -77,6 +77,7 @@ async def latex_rewrite(body: LatexRewriteRequest):
             selected_section_ids=body.selected_section_ids,
             jd_text=body.jd_text,
             missing_skills=body.missing_skills,
+            matched_skills=body.matched_skills,
             suggestions=body.suggestions,
         )
     except ValueError as exc:

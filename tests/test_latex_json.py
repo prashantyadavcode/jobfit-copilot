@@ -149,6 +149,42 @@ CGPA: 8.98/10.0 \\
 """.strip()
 
 
+EXPERIENCE_SAMPLE = r"""
+\textbf{Kaidoko Automation Solutions Private Limited} \hfill {New Delhi} \\
+\textit{Machine Learning Engineer (Full-time)} \hfill {Feb 2025 - Present} \\
+
+\begin{itemize}[leftmargin=0.5cm, itemsep=1pt, parsep=2pt]
+\item Developed and maintained end-to-end NLP and ML workflows for a confidential EdTech client.
+\item Built scalable text-processing pipelines using spaCy, NLTK, and Hugging Face Transformers.
+\end{itemize}
+""".strip()
+
+
+def test_experience_enhanced_adds_and_highlights_skills():
+    sample = EXPERIENCE_SAMPLE + (
+        "\n\\item Containerized ML applications using Docker, managed version control through Git, "
+        "and utilized AWS S3 and Google BigQuery for scalable data storage."
+    )
+    result = LatexService._rewrite_experience_enhanced(
+        sample,
+        missing_skills=["azure", "gcp", "rasa"],
+        matched_skills=["python", "docker", "fastapi"],
+    )
+    assert r"\item Developed" in result
+    deploy_line = [line for line in result.splitlines() if "Docker" in line and "\\item" in line][0]
+    assert r"\textbf{Docker}" in deploy_line
+    assert "Azure" in deploy_line or "GCP" in deploy_line
+    assert r"\textbf{Rasa}" in result or "Applied \\textbf{Rasa}" in result
+
+
+def test_restore_stripped_latex_commands():
+    broken = "textbf{Kaidoko} hfill {New Delhi} \\\ntextit{Engineer}"
+    fixed = LatexService._restore_stripped_latex_commands(broken)
+    assert r"\hfill" in fixed
+    assert r"\textit{" in fixed
+    assert r"\textbf{" in fixed
+
+
 def test_education_deterministic_preserves_hfill_and_ampersand():
     result = LatexService._rewrite_education_deterministic(EDUCATION_SAMPLE, "")
     assert r"\hfill" in result

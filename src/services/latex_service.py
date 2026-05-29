@@ -102,6 +102,59 @@ SKILL_LINE_LABEL_HINTS: dict[str, tuple[str, ...]] = {
     "data": ("data processing", "tools"),
 }
 
+# Keywords in an experience bullet that suggest which missing skill fits there.
+BULLET_CONTEXT_HINTS: dict[str, tuple[str, ...]] = {
+    "programming": ("python", "script", "pipeline", "automat", "workflow", "code"),
+    "nlp": (
+        "nlp",
+        "text",
+        "spacy",
+        "nltk",
+        "transformer",
+        "ner",
+        "langchain",
+        "rag",
+        "token",
+        "sentiment",
+        "classification",
+        "intent",
+        "generative",
+        "language",
+    ),
+    "machine learning": (
+        "model",
+        "machine learning",
+        "scikit",
+        "pytorch",
+        "tensorflow",
+        "forecast",
+        "train",
+        "f1-score",
+        "cross-validation",
+        "precision",
+        "roc-auc",
+        "inference",
+    ),
+    "backend": (
+        "fastapi",
+        "flask",
+        "api",
+        "rest",
+        "backend",
+        "deploy",
+        "docker",
+        "git",
+        "container",
+        "microservice",
+        "cloud",
+        "aws",
+        "s3",
+        "bigquery",
+        "production",
+    ),
+    "data": ("pandas", "etl", "data", "warehouse", "mongodb", "database", "analytics"),
+}
+
 
 class LatexService:
     def __init__(
@@ -177,45 +230,54 @@ class LatexService:
         selected_section_ids: list[str],
         jd_text: str,
         missing_skills: list[str],
-        suggestions: list[str],
+        matched_skills: list[str] | None = None,
+        suggestions: list[str] | None = None,
     ) -> dict[str, Any]:
+        matched_skills = matched_skills or []
+        suggestions = suggestions or []
         sections = self.extract_sections(latex_code)
         selected_sections = [s for s in sections if s["id"] in selected_section_ids]
         if not selected_sections:
             return {"rewrites": [], "message": "No matching sections selected."}
 
         rewritten_sections: list[dict[str, str]] = []
-        skills_sections = [s for s in selected_sections if "skill" in s["title"].lower()]
-        education_sections = [
-            s for s in selected_sections
-            if "education" in s["title"].lower() and "skill" not in s["title"].lower()
+        preserve_sections = [
+            s for s in selected_sections if self._is_preserve_only_section(s["title"])
+        ]
+        experience_sections = [
+            s
+            for s in selected_sections
+            if self._is_experience_section(s["title"]) and s not in preserve_sections
         ]
         other_sections = [
             s
             for s in selected_sections
-            if "skill" not in s["title"].lower() and "education" not in s["title"].lower()
+            if s not in preserve_sections and s not in experience_sections
         ]
 
-        for section in skills_sections:
+        for section in preserve_sections:
             rewritten_sections.append(
                 {
                     "id": section["id"],
                     "title": section["title"],
-                    "content": self._rewrite_skills_deterministic(
-                        section["content"],
+                    "content": self._rewrite_section_deterministic(
+                        section,
                         missing_skills,
+                        matched_skills,
+                        jd_text,
                     ),
                 }
             )
 
-        for section in education_sections:
+        for section in experience_sections:
             rewritten_sections.append(
                 {
                     "id": section["id"],
                     "title": section["title"],
-                    "content": self._rewrite_education_deterministic(
+                    "content": self._rewrite_experience_enhanced(
                         section["content"],
-                        jd_text,
+                        missing_skills,
+                        matched_skills,
                     ),
                 }
             )
@@ -236,7 +298,9 @@ class LatexService:
                 rewritten_sections.append(item)
 
         merged_latex = self._merge_rewrites_into_latex(latex_code, rewritten_sections)
-        message = self._rewrite_status_message(skills_sections, education_sections, other_sections)
+        message = self._rewrite_status_message(
+            preserve_sections, experience_sections, other_sections
+        )
         return {
             "rewrites": rewritten_sections,
             "merged_latex": merged_latex,
@@ -244,16 +308,82 @@ class LatexService:
         }
 
     @staticmethod
+    def _is_preserve_only_section(title: str) -> bool:
+        lowered = title.lower()
+        return "skill" in lowered or "education" in lowered
+
+    @staticmethod
+    def _is_experience_section(title: str) -> bool:
+        return "experience" in title.lower()
+
+    @classmethod
+    def _rewrite_section_deterministic(
+        cls,
+        section: dict[str, Any],
+        missing_skills: list[str],
+        matched_skills: list[str],
+        jd_text: str,
+    ) -> str:
+        title = section["title"].lower()
+        content = section["content"]
+        if "skill" in title:
+            return cls._rewrite_skills_deterministic(content, missing_skills)
+        return cls._rewrite_education_deterministic(content, jd_text)
+
+    @classmethod
+    def _rewrite_experience_enhanced(
+        cls,
+        active_original: str,
+        missing_skills: list[str],
+        matched_skills: list[str],
+    ) -> str:
+        """Keep LaTeX headers; enhance \\item bullets with JD skills (added + \\textbf highlight)."""
+        base = cls._extract_active_latex(active_original)
+        if not base:
+            return base
+
+        remaining = [s for s in missing_skills if s.strip()]
+        lines = base.splitlines()
+        output: list[str] = []
+        item_indices = [i for i, line in enumerate(lines) if line.strip().startswith("\\item")]
+
+        for idx, line in enumerate(lines):
+            if idx not in item_indices:
+                output.append(line)
+                continue
+            enhanced, remaining = cls._enhance_experience_bullet(
+                line,
+                remaining,
+                matched_skills,
+            )
+            output.append(enhanced)
+
+        if remaining and item_indices:
+            last_item_idx = item_indices[-1]
+            pos = item_indices.index(last_item_idx)
+            output[pos], _ = cls._enhance_experience_bullet(
+                output[pos],
+                remaining,
+                matched_skills,
+                max_additions=3,
+            )
+
+        return "\n".join(output)
+
+    @staticmethod
     def _rewrite_status_message(
-        skills_sections: list[dict[str, Any]],
-        education_sections: list[dict[str, Any]],
+        preserve_sections: list[dict[str, Any]],
+        experience_sections: list[dict[str, Any]],
         other_sections: list[dict[str, Any]],
     ) -> str:
+        titles = [s["title"].lower() for s in preserve_sections]
         parts: list[str] = []
-        if skills_sections:
+        if any("skill" in t for t in titles):
             parts.append("skills updated (format preserved)")
-        if education_sections:
+        if any("education" in t for t in titles):
             parts.append("education preserved (LaTeX-safe)")
+        if experience_sections:
+            parts.append("experience bullets updated (JD skills added and highlighted)")
         if other_sections:
             parts.append("other sections rewritten with AI")
         return "; ".join(parts).capitalize() + "." if parts else "Sections rewritten successfully."
@@ -295,6 +425,121 @@ class LatexService:
         existing = match.group(2).rstrip().rstrip(",")
         merged = f"{existing}, {', '.join(to_add)}"
         return education[: match.start(2)] + merged + education[match.end(2) :]
+
+    @classmethod
+    def _enhance_experience_bullet(
+        cls,
+        line: str,
+        missing_skills: list[str],
+        matched_skills: list[str],
+        max_additions: int = 2,
+    ) -> tuple[str, list[str]]:
+        bullet_lower = line.lower()
+        to_add: list[str] = []
+        still_missing: list[str] = []
+
+        for skill in missing_skills:
+            if cls._skill_item_in_text(skill, line):
+                continue
+            if cls._skill_relevant_to_bullet(skill, bullet_lower):
+                to_add.append(skill)
+            else:
+                still_missing.append(skill)
+
+        updated = cls._bold_skills_in_bullet(line, matched_skills + missing_skills)
+
+        if to_add:
+            additions = to_add[:max_additions]
+            placed = {a.lower() for a in additions}
+            still_missing = [s for s in still_missing if s.lower() not in placed]
+            bold_terms = ", ".join(f"\\textbf{{{cls._format_skill_token(s)}}}" for s in additions)
+            clause = f" Applied {bold_terms} in this role."
+            if updated.rstrip().endswith("."):
+                updated = updated.rstrip()[:-1] + clause
+            else:
+                updated = updated.rstrip() + clause
+
+        return updated, still_missing
+
+    @classmethod
+    def _skill_relevant_to_bullet(cls, skill: str, bullet_lower: str) -> bool:
+        skill_cat = cls._pick_skill_category(skill.lower())
+        bullet_cats = cls._bullet_categories(bullet_lower)
+        if skill_cat in bullet_cats:
+            return True
+        if skill_cat == "backend" and skill.lower() in {"azure", "gcp", "aws", "mlops", "s3", "bigquery"}:
+            return bool(bullet_cats & {"backend", "data"})
+        if skill_cat == "nlp" and skill.lower() in {"rasa", "summarization"}:
+            return "nlp" in bullet_cats
+        return False
+
+    @staticmethod
+    def _bullet_categories(bullet_lower: str) -> set[str]:
+        categories: set[str] = set()
+        for category, hints in BULLET_CONTEXT_HINTS.items():
+            if any(hint in bullet_lower for hint in hints):
+                categories.add(category)
+        return categories or {"backend"}
+
+    @classmethod
+    def _bold_skills_in_bullet(cls, line: str, skills: list[str]) -> str:
+        if not line.strip().startswith("\\item"):
+            return line
+        updated = line
+        seen: set[str] = set()
+        for skill in skills:
+            key = skill.lower().strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            for variant in cls._skill_highlight_variants(skill):
+                updated = cls._bold_first_unbold_match(updated, variant)
+        return updated
+
+    @classmethod
+    def _skill_highlight_variants(cls, skill: str) -> list[str]:
+        token = cls._format_skill_token(skill)
+        variants = [token]
+        lowered = skill.lower()
+        aliases = {
+            "gcp": ["GCP", "Google Cloud Platform"],
+            "aws": ["AWS", "AWS S3"],
+            "nlp": ["NLP"],
+            "ner": ["NER", "Named Entity Recognition"],
+            "api": ["API", "REST APIs", "REST API"],
+            "mlops": ["MLOps"],
+            "llm": ["LLMs", "LLM"],
+        }
+        variants.extend(aliases.get(lowered, []))
+        unique: list[str] = []
+        seen: set[str] = set()
+        for variant in variants:
+            key = variant.lower()
+            if key not in seen:
+                seen.add(key)
+                unique.append(variant)
+        return sorted(unique, key=len, reverse=True)
+
+    @staticmethod
+    def _bold_first_unbold_match(text: str, term: str) -> str:
+        if not term or len(term) < 2:
+            return text
+        escaped = re.escape(term)
+        if re.match(r"^[a-z0-9]+$", term, re.IGNORECASE):
+            pattern = re.compile(rf"\b{escaped}\b", re.IGNORECASE)
+        else:
+            pattern = re.compile(escaped, re.IGNORECASE)
+        for match in pattern.finditer(text):
+            if LatexService._inside_textbf(text, match.start()):
+                continue
+            original = match.group(0)
+            return text[: match.start()] + f"\\textbf{{{original}}}" + text[match.end() :]
+        return text
+
+    @staticmethod
+    def _inside_textbf(text: str, position: int) -> bool:
+        before = text[:position]
+        return before.rfind("\\textbf{") > before.rfind("}")
 
     @classmethod
     def _rewrite_skills_deterministic(cls, active_original: str, missing_skills: list[str]) -> str:
@@ -504,6 +749,9 @@ class LatexService:
         text = LatexService._normalize_escaped_line_breaks(text)
         text = LatexService._remove_jd_prose_and_invalid_blocks(text)
         text = LatexService._fix_malformed_latex_fragments(text)
+        text = LatexService._restore_stripped_latex_commands(text)
+        if section_title and "experience" in section_title.lower():
+            text = LatexService._strip_projects_bleed_from_experience(text)
         text = text.replace(" Ö ", r" \& ").replace(" Ð ", r" \& ")
         text = text.replace(" ö ", r" \& ").replace(" ð ", r" \& ")
         text = re.sub(r"(?<!\\)&(?!\\)", r"\\&", text)
@@ -531,9 +779,13 @@ class LatexService:
             return True
         if original.count("{") and rewritten.count("{") != rewritten.count("}"):
             return True
-        if r"\hfill" in original and r"\hfill" not in rewritten:
+        if r"\hfill" in original and r"\hfill" not in rewritten and "hfill" not in rewritten:
+            return True
+        if r"\textit" in original and r"\textit" not in rewritten and "extit" in rewritten:
             return True
         if r"\\" in original and r"\\" not in rewritten:
+            return True
+        if "itemize" in original and "itemize" not in rewritten and r"\item" not in rewritten:
             return True
         if r"\&" in original and "&" in rewritten.replace(r"\&", ""):
             return True
@@ -581,6 +833,39 @@ class LatexService:
         text = re.sub(r",?\s*itemsep=[^,\]]+", "", text, flags=re.IGNORECASE)
         text = re.sub(r",?\s*parsep=[^,\]]+", "", text, flags=re.IGNORECASE)
         return text
+
+    @staticmethod
+    def _restore_stripped_latex_commands(content: str) -> str:
+        """Repair common LLM damage where leading backslashes are dropped."""
+        replacements = [
+            (r"(?<![\\])hfill\b", r"\\hfill"),
+            (r"(?<![\\])extit\{", r"\\textit{"),
+            (r"(?<![\\])extbf\{", r"\\textbf{"),
+            (r"(?<![\\])footnotesize\{", r"\\footnotesize{"),
+            (r"(?<![\\])vspace\{", r"\\vspace{"),
+            (r"\nitem\s", r"\n\\item "),
+            (r"^item\s", r"\\item "),
+        ]
+        text = content
+        for pattern, repl in replacements:
+            text = re.sub(pattern, repl, text, flags=re.MULTILINE)
+        return text
+
+    @staticmethod
+    def _strip_projects_bleed_from_experience(content: str) -> str:
+        project_markers = (
+            "avalanche",
+            "stock predict",
+            "stock forecasting",
+            "geospatial analysis",
+        )
+        kept: list[str] = []
+        for line in content.splitlines():
+            lower = line.lower()
+            if any(marker in lower for marker in project_markers):
+                continue
+            kept.append(line)
+        return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
 
     @staticmethod
     def _is_valid_skill_item(item: str) -> bool:
@@ -700,14 +985,18 @@ class LatexService:
 
     @staticmethod
     def _skill_item_in_text(item: str, text: str) -> bool:
-        item_l = item.lower()
+        item_l = item.lower().strip()
         text_l = text.lower()
+        if re.match(r"^[a-z0-9 .+\-/&]+$", item_l):
+            if re.search(rf"\b{re.escape(item_l)}\b", text_l):
+                return True
         if item_l in text_l:
             return True
         words = [w for w in re.findall(r"[a-z0-9]+", item_l) if len(w) > 2]
         if not words:
-            return item_l in text_l
-        return sum(1 for word in words if word in text_l) >= max(1, len(words) - 1)
+            return bool(re.search(rf"\b{re.escape(item_l)}\b", text_l))
+        matched = sum(1 for word in words if re.search(rf"\b{re.escape(word)}\b", text_l))
+        return matched >= max(1, len(words) - 1)
 
     @staticmethod
     def _normalize_skill_label(label: str) -> str:
