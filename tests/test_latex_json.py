@@ -140,6 +140,40 @@ def test_rebalance_moves_cloud_skills_out_of_nlp_line():
     assert "Azure" not in nlp_line
 
 
+EDUCATION_SAMPLE = r"""
+\vspace{5pt}
+\textbf{Guru Gobind Singh Indraprastha University} \hfill {Pitampura, India} \\
+Bachelor of Technology - Artificial Intelligence \& Machine Learning \hfill {2021 - 2025} \\
+CGPA: 8.98/10.0 \\
+\textit{\footnotesize{\textbf{Relevant Courses:} Advances in Machine Learning, Data Mining, Statistics, DBMS}}
+""".strip()
+
+
+def test_education_deterministic_preserves_hfill_and_ampersand():
+    result = LatexService._rewrite_education_deterministic(EDUCATION_SAMPLE, "")
+    assert r"\hfill" in result
+    assert r"\&" in result
+    assert "Guru Gobind Singh" in result
+    assert "CGPA" in result
+
+
+def test_education_appends_jd_courses_when_relevant():
+    jd = "Looking for deep learning and NLP experience."
+    result = LatexService._rewrite_education_deterministic(EDUCATION_SAMPLE, jd)
+    assert "Deep Learning" in result or "deep learning" in result.lower()
+
+
+def test_sanitize_falls_back_to_original_for_broken_education_llm_output():
+    broken = "Bachelor of Technology - Artificial Intelligence & Machine Learning 2021 - 2025"
+    fixed = LatexService._sanitize_rewrite_content(
+        broken,
+        section_title="Education",
+        original_content=EDUCATION_SAMPLE,
+    )
+    assert r"\hfill" in fixed
+    assert r"\&" in fixed
+
+
 def test_deterministic_skills_preserves_textbf_format():
     original = (
         r"\textbf{Programming:} Python, SQL, C++ \\"

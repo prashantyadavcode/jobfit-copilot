@@ -186,7 +186,15 @@ class LatexService:
 
         rewritten_sections: list[dict[str, str]] = []
         skills_sections = [s for s in selected_sections if "skill" in s["title"].lower()]
-        other_sections = [s for s in selected_sections if "skill" not in s["title"].lower()]
+        education_sections = [
+            s for s in selected_sections
+            if "education" in s["title"].lower() and "skill" not in s["title"].lower()
+        ]
+        other_sections = [
+            s
+            for s in selected_sections
+            if "skill" not in s["title"].lower() and "education" not in s["title"].lower()
+        ]
 
         for section in skills_sections:
             rewritten_sections.append(
@@ -196,6 +204,18 @@ class LatexService:
                     "content": self._rewrite_skills_deterministic(
                         section["content"],
                         missing_skills,
+                    ),
+                }
+            )
+
+        for section in education_sections:
+            rewritten_sections.append(
+                {
+                    "id": section["id"],
+                    "title": section["title"],
+                    "content": self._rewrite_education_deterministic(
+                        section["content"],
+                        jd_text,
                     ),
                 }
             )
@@ -216,17 +236,65 @@ class LatexService:
                 rewritten_sections.append(item)
 
         merged_latex = self._merge_rewrites_into_latex(latex_code, rewritten_sections)
-        skills_only = bool(skills_sections) and not other_sections
-        message = (
-            "Skills updated (original formatting kept; missing skills added by category)."
-            if skills_only
-            else "Sections rewritten successfully."
-        )
+        message = self._rewrite_status_message(skills_sections, education_sections, other_sections)
         return {
             "rewrites": rewritten_sections,
             "merged_latex": merged_latex,
             "message": message,
         }
+
+    @staticmethod
+    def _rewrite_status_message(
+        skills_sections: list[dict[str, Any]],
+        education_sections: list[dict[str, Any]],
+        other_sections: list[dict[str, Any]],
+    ) -> str:
+        parts: list[str] = []
+        if skills_sections:
+            parts.append("skills updated (format preserved)")
+        if education_sections:
+            parts.append("education preserved (LaTeX-safe)")
+        if other_sections:
+            parts.append("other sections rewritten with AI")
+        return "; ".join(parts).capitalize() + "." if parts else "Sections rewritten successfully."
+
+    @classmethod
+    def _rewrite_education_deterministic(cls, active_original: str, jd_text: str) -> str:
+        """Education uses fragile LaTeX (\\hfill, nested braces) — keep structure, optional JD courses."""
+        base = cls._extract_active_latex(active_original)
+        if not base:
+            return base
+        return cls._append_jd_courses_to_education(base, jd_text)
+
+    @classmethod
+    def _append_jd_courses_to_education(cls, education: str, jd_text: str) -> str:
+        jd_lower = jd_text.lower()
+        course_catalog = [
+            ("Deep Learning", "deep learning"),
+            ("Natural Language Processing", "natural language processing"),
+            ("Computer Vision", "computer vision"),
+            ("MLOps", "mlops"),
+            ("Cloud Computing", "cloud"),
+        ]
+        to_add = [
+            label
+            for label, key in course_catalog
+            if key in jd_lower and key not in education.lower() and label.lower() not in education.lower()
+        ]
+        if not to_add:
+            return education
+
+        courses_pattern = re.compile(
+            r"(\\textbf\{Relevant Courses:\}\s*)([^}]+)(?=\}\s*\})",
+            re.IGNORECASE,
+        )
+        match = courses_pattern.search(education)
+        if not match:
+            return education
+
+        existing = match.group(2).rstrip().rstrip(",")
+        merged = f"{existing}, {', '.join(to_add)}"
+        return education[: match.start(2)] + merged + education[match.end(2) :]
 
     @classmethod
     def _rewrite_skills_deterministic(cls, active_original: str, missing_skills: list[str]) -> str:
@@ -445,10 +513,31 @@ class LatexService:
         text = LatexService._collapse_duplicate_category_labels(text)
         text = LatexService._dedupe_inline_skill_values(text)
 
-        if not text.strip() and original_content:
-            return LatexService._extract_active_latex(original_content)
+        active_original = LatexService._extract_active_latex(original_content) if original_content else ""
+        if active_original and (not text.strip() or LatexService._is_broken_latex_rewrite(text, active_original)):
+            return active_original
 
-        return text.rstrip().rstrip("\\").rstrip()
+        if text.endswith(r"\n"):
+            text = text[:-2].rstrip()
+        return text.rstrip()
+
+    @staticmethod
+    def _is_broken_latex_rewrite(rewritten: str, original: str) -> bool:
+        if not rewritten.strip():
+            return True
+        if JD_PROSE_RE.search(rewritten):
+            return True
+        if re.search(r"leftmargin|itemsep|parsep", rewritten, re.IGNORECASE):
+            return True
+        if original.count("{") and rewritten.count("{") != rewritten.count("}"):
+            return True
+        if r"\hfill" in original and r"\hfill" not in rewritten:
+            return True
+        if r"\\" in original and r"\\" not in rewritten:
+            return True
+        if r"\&" in original and "&" in rewritten.replace(r"\&", ""):
+            return True
+        return False
 
     @staticmethod
     def _remove_jd_prose_and_invalid_blocks(content: str) -> str:
