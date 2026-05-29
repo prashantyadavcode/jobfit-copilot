@@ -34,7 +34,6 @@ SECTION_PATTERN = re.compile(
     re.DOTALL,
 )
 
-# Commands that must not appear inside a rewritten section body (next-section leak).
 NEXT_LATEX_BOUNDARY_RE = re.compile(
     r"(?:\\{2,}\\section\*?\{|\\section\*?\{|\\subsection\*?\{|\\chapter\*?\{|\\vspace\*?\{)",
     re.IGNORECASE,
@@ -46,7 +45,6 @@ JD_PROSE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Checked before fuzzy hints; keys are normalized lowercase tokens.
 EXACT_SKILL_CATEGORY: dict[str, str] = {
     "azure": "backend",
     "gcp": "backend",
@@ -85,7 +83,6 @@ EXACT_SKILL_CATEGORY: dict[str, str] = {
     "beautifulsoup": "data",
 }
 
-# Order matters: cloud/backend is checked before NLP to avoid mis-routing.
 SKILL_CATEGORY_HINTS: dict[str, tuple[str, ...]] = {
     "programming": ("python", "sql", "c++", "java", "javascript"),
     "backend": ("fastapi", "flask", "rest api", "rest", "docker", "git", "aws", "gcp", "azure", "mlops", "s3", "bigquery"),
@@ -102,7 +99,6 @@ SKILL_LINE_LABEL_HINTS: dict[str, tuple[str, ...]] = {
     "data": ("data processing", "tools"),
 }
 
-# Keywords in an experience bullet that suggest which missing skill fits there.
 BULLET_CONTEXT_HINTS: dict[str, tuple[str, ...]] = {
     "programming": ("python", "script", "pipeline", "automat", "workflow", "code"),
     "nlp": (
@@ -366,7 +362,6 @@ class LatexService:
         missing_skills: list[str],
         matched_skills: list[str],
     ) -> str:
-        """Keep LaTeX headers; enhance \\item bullets with JD skills (added + \\textbf highlight)."""
         base = cls._extract_active_latex(active_original)
         if not base:
             return base
@@ -427,14 +422,6 @@ class LatexService:
         missing_skills: list[str],
         matched_skills: list[str],
     ) -> str:
-        """
-        Projects: preserve LaTeX/macros; update bullet-like lines by adding + highlighting skills.
-
-        Supports:
-        - \\item ...
-        - \\resumeItem{...}{...}
-        - \\resumeSubItem{...}{...}
-        """
         base = cls._extract_active_latex(active_original)
         if not base:
             return base
@@ -478,10 +465,6 @@ class LatexService:
         matched_skills: list[str],
         macros: tuple[str, ...],
     ) -> tuple[str, list[str]] | None:
-        """
-        Enhance a line like \\resumeSubItem{Title}{Description}.
-        Only touches the second argument (description).
-        """
         stripped = line.strip()
         for macro in macros:
             pattern = re.compile(
@@ -505,7 +488,6 @@ class LatexService:
 
     @classmethod
     def _rewrite_education_deterministic(cls, active_original: str, jd_text: str) -> str:
-        """Education uses fragile LaTeX (\\hfill, nested braces) — keep structure, optional JD courses."""
         base = cls._extract_active_latex(active_original)
         if not base:
             return base
@@ -658,7 +640,6 @@ class LatexService:
 
     @classmethod
     def _rewrite_skills_deterministic(cls, active_original: str, missing_skills: list[str]) -> str:
-        """Skills: never call the LLM — only add missing JD skills into the user's existing lines."""
         base = cls._extract_active_latex(active_original)
         if not base:
             return base
@@ -692,13 +673,6 @@ class LatexService:
 
     @staticmethod
     def _extract_leading_comment_block(latex_code: str, section_start: int) -> str:
-        """
-        Capture consecutive comment lines immediately preceding a \\section{...}.
-
-        This prevents section divider comments like:
-          %-----------EDUCATION-----------------
-        from being "eaten" by the previous section when we rewrite in-place.
-        """
         if section_start <= 0:
             return ""
         before = latex_code[:section_start]
@@ -708,7 +682,6 @@ class LatexService:
 
         collected: list[str] = []
         i = len(lines) - 1
-        # Allow blank lines between comments and the section.
         while i >= 0 and lines[i].strip() == "":
             collected.append(lines[i])
             i -= 1
@@ -720,7 +693,6 @@ class LatexService:
                 i -= 1
 
         block = "\n".join(reversed(collected)).rstrip()
-        # Only keep "divider-like" blocks to avoid pulling normal comments from previous content.
         if not re.search(r"%\s*-{3,}|%\s*={3,}|%.*EDUCATION|%.*EXPERIENCE|%.*PROJECT", block, re.IGNORECASE):
             return ""
         return block
@@ -873,7 +845,6 @@ class LatexService:
 
     @staticmethod
     def _extract_active_latex(content: str) -> str:
-        """Keep only uncommented lines — ignores dead/legacy blocks the user commented out."""
         active: list[str] = []
         for line in content.splitlines():
             if line.strip().startswith("%"):
@@ -989,7 +960,6 @@ class LatexService:
 
     @staticmethod
     def _restore_stripped_latex_commands(content: str) -> str:
-        """Repair common LLM damage where leading backslashes are dropped."""
         replacements = [
             (r"(?<![\\])hfill\b", r"\\hfill"),
             (r"(?<![\\])extit\{", r"\\textit{"),
@@ -1084,7 +1054,6 @@ class LatexService:
 
     @classmethod
     def _rebalance_skill_categories(cls, content: str) -> str:
-        """Move skills onto the correct \\textbf category line (e.g. Azure -> Backend, not NLP)."""
         lines = cls._parse_textbf_skill_lines(content)
         if not lines:
             return content
@@ -1208,7 +1177,6 @@ class LatexService:
 
     @classmethod
     def _preserve_user_skills_content(cls, rewritten: str, original: str) -> str:
-        """Keep every skill item from the user's original LaTeX; only add new ones from the rewrite."""
         orig_lines = cls._parse_textbf_skill_lines(original)
         if not orig_lines:
             return cls._preserve_loose_skill_tokens(rewritten, original)
@@ -1265,7 +1233,6 @@ class LatexService:
 
     @staticmethod
     def _preserve_loose_skill_tokens(rewritten: str, original: str) -> str:
-        """Fallback when skills are not structured with \\textbf lines."""
         rewritten_lower = rewritten.lower()
         missing_chunks: list[str] = []
         for chunk in re.split(r",|\n|\\\\", original):
@@ -1294,14 +1261,12 @@ class LatexService:
 
     @staticmethod
     def _normalize_escaped_line_breaks(content: str) -> str:
-        """Turn JSON/LaTeX artifacts like \\\\n or \\n into real newlines between skill lines."""
         text = re.sub(r"\\{2,}n(?![A-Za-z])", "\n", content)
         text = re.sub(r"(?<!\\)\\n(?![A-Za-z])", "\n", text)
         return text
 
     @staticmethod
     def _collapse_duplicate_category_labels(content: str) -> str:
-        """Merge 'Label: A Label: B' into 'Label: A, B' when the same label repeats."""
         pattern = re.compile(
             r"(?P<prefix>(?:\\textbf\{)?)(?P<label>[^}:]+?):\s*"
             r"(?P<val>[^:]+?)\s+(?P=prefix)(?P=label):\s*",
@@ -1323,7 +1288,6 @@ class LatexService:
 
     @staticmethod
     def _dedupe_inline_skill_values(content: str) -> str:
-        """Remove duplicate comma-separated tokens inside a category value span."""
         def dedupe_values(match: re.Match[str]) -> str:
             prefix, label, values = match.group(1), match.group(2), match.group(3)
             parts = [part.strip() for part in values.split(",") if part.strip()]
@@ -1346,7 +1310,6 @@ class LatexService:
 
     @staticmethod
     def _align_skills_line_endings(content: str, original_content: str) -> str:
-        """Ensure skill lines end with LaTeX line breaks like the source section."""
         original_uses_double_slash = "\\\\" in original_content
         lines = [line.strip() for line in content.splitlines() if line.strip()]
         normalized: list[str] = []
@@ -1421,7 +1384,6 @@ class LatexService:
 
     @staticmethod
     def _parse_rewrites_fallback(text: str) -> list[dict[str, str]]:
-        """Extract rewrite objects when the outer JSON envelope is broken."""
         rewrites: list[dict[str, str]] = []
         for match in re.finditer(
             r'"id"\s*:\s*"(?P<id>[^"\\]*(?:\\.[^"\\]*)*)"\s*,\s*'

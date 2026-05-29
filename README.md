@@ -82,3 +82,7 @@ Open: http://localhost:8000/
 **Tools & DevOps** — Git, GitHub, venv, pip, `.env` configuration
 
 **Concepts** — Resume–JD fit scoring, Skill overlap, Missing-skill detection, ATS optimization, Explainable NLP pipeline
+
+## Build notes
+
+Personal learnings while building this project (by module): [LEARNINGS.md](LEARNINGS.md)

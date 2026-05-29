@@ -280,7 +280,6 @@ rewriteBtn.addEventListener('click', async () => {
         const err = JSON.parse(raw);
         message = typeof err.detail === 'string' ? err.detail : raw;
       } catch {
-        // keep raw body
       }
       throw new Error(message);
     }

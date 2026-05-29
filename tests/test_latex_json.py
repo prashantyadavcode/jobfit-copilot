@@ -20,7 +20,6 @@ def test_parse_rewrites_json_with_markdown_fence():
 
 
 def test_parse_rewrites_json_repairs_latex_backslashes():
-    # Invalid JSON: single backslash before textbf; repair_json should recover structure.
     raw = (
         '{"rewrites":[{"id":"section_0","title":"Skills",'
         '"content":"\\textbf{Python} and \\textit{NLP} with Docker"}]}'
