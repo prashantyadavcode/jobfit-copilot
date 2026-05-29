@@ -10,10 +10,6 @@ from src.services.analyzer_service import AnalyzerService
 from src.services.latex_service import LatexService
 from src.services.parser_service import parse_file
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-PUBLIC_DIR = PROJECT_ROOT / 'public'
-STATIC_DIR = PUBLIC_DIR / 'static'
-
 settings = get_settings()
 service = AnalyzerService(spacy_model=settings.spacy_model)
 latex_service = LatexService(
@@ -27,13 +23,13 @@ latex_service = LatexService(
 
 app = FastAPI(title=settings.app_name, version='1.0.0')
 
-if STATIC_DIR.is_dir():
-    app.mount('/static', StaticFiles(directory=STATIC_DIR), name='static')
+STATIC_DIR = Path(__file__).resolve().parent / 'static'
+app.mount('/static', StaticFiles(directory=STATIC_DIR), name='static')
 
 
 @app.get('/', include_in_schema=False)
 def home() -> FileResponse:
-    return FileResponse(PUBLIC_DIR / 'index.html')
+    return FileResponse(STATIC_DIR / 'index.html')
 
 
 @app.get('/health')
@@ -88,4 +84,3 @@ async def latex_rewrite(body: LatexRewriteRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to rewrite sections: {exc}") from exc
-
